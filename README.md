@@ -19,4 +19,4 @@ Then type bash MakeMP4s.sh in your terminal and follow instructions.
 
 Note: All the directories you specify in the .conf will be created, if non existend. Also each movie gets its own subdirectory.
 
-Please leave your feedback.
+Please leave your feedback. 
