@@ -52,10 +52,89 @@ else
     fi
 fi
 
+# Function for extracting RPU. Argument position: Original MKV File with DV metadata
+extract_RPU(){
+    echo -e "${ORANGE}Dolby Vision detected. Starting to extract RPU${NOCOLOR}"
+    # Get the Dolby Vision Type. Is not actually necessary to make it work.
+    DV_Meta_String=$(mediainfo --Output=Video\;%HDR_Format% "$1")
+    # Specifying Directories
+    rpu_file="${working_dir_movie}/${title}${teststring}_RPU.bin"
+    orig_video_stream="${working_dir_movie}/${title}${teststring}_raw.hevc"
+    trans_file_DV="${target_dir_movie}/${title}${teststring} - DV${res_str}.mp4"
+
+    # Extract RPU
+    ffmpeg -y -i "${orig_file}" -c:v:0 copy -frames:v:0 "${stop_at_ffmpeg_f}" -vbsf hevc_mp4toannexb -f hevc "${orig_video_stream}" 2> "${DV_ffmpeg_extract_log}"
+    dovi_tool  -m 2 -c --drop-hdr10plus extract-rpu "${orig_video_stream}" -o "${rpu_file}" 2>&1 | tee -a "${DV_dovi_extract_log}"
+
+    if [[ $(grep "Reordering metadata... Done." "${DV_dovi_extract_log}") ]]; then
+      echo -e "${ORANGE}Dolby Vision metadata was succesfully extracted.${NOCOLOR}"
+      echo "Dolby Vision metadata was succesfully extracted." >> "${gen_log}"
+      extract_success="true"
+      return "${rpu_file}"
+    else
+      echo -e "${ORANGE}Dolby Vision metadata extraction failed. Check logs: ${DV_dovi_extract_log}${NOCOLOR}"
+      echo "Dolby Vision metadata extraction failed. Check logs: ${DV_dovi_extract_log}" >> "${gen_log}"
+      extract_success="false"
+    fi
+}
+
+# Function for injection RPU Metadata. Argument position: 1: Transcoded file location 2: Resolution-String (e.g. 1080p) 3: rpu-file
+inject_RPU(){
+
+    # Prepare Logs:
+    DV_mux_log="${log_dir_movie_date}/${title}${teststring} - ${2}p_mux.log"
+    touch "${DV_mux_log}"
+    echo "Title: ${title}" >> "${DV_mux_log}"
+    echo "Log for: ${current_date_time}" >> "${DV_mux_log}"
+    # Set Paths for the Videostreamfiles in working directory
+    vidbitstr_file="${working_dir_movie}/${title}${teststring} - ${2}.hevc"
+    vidbitstr_DV_file="${working_dir_movie}/${title}${teststring} - DV${2}.hevc"
+
+    #Demux Transcoded Video from MP4 hand over to dovi and inject rpu and remux everything together
+    echo -e "${ORANGE}Starting extraction of Video Bitstream of Transcoded MP4.${NOCOLOR}"
+    ffmpeg -i "${1}" -vcodec copy -vbsf hevc_mp4toannexb -f hevc -y "${vidbitstr_file}" 2>> "${DV_orig_mux_log}"
+
+    echo -e "${ORANGE}Starting injection of RPU in Video Bitstream of Transcoded MP4.${NOCOLOR}"
+    dovi_tool inject-rpu -i "${vidbitstr_file}" --rpu-in "${3}" -o "${vidbitstr_DV_file}" 2>> "${DV_orig_mux_log}"
+
+    echo -e "${ORANGE}Starting Remuxing of DV bitstream and original audio from MP4.${NOCOLOR}"
+    ffmpeg -i "${1}" -i "${vidbitstr_DV_file}" -map 1:v -map 0:a -c copy -y "${trans_file_DV}" 2>> "${DV_orig_mux_log}"
+}
+
+# Function for transcoding. Argument position: 1: Original File location 2:Transcoded file location 3: resolution width in pixel (e.g. 1920 or 3840)
+transcode(){
+  #Prep Transcode
+    #LOGS
+    trans_log="${log_dir_movie_date}/${title}${teststring} - ${3}p_transcode.log"
+    touch "${trans_log}"
+    echo "Title: ${title}" >> "${trans_log}"
+    echo "Log for: ${current_date_time}" >> "${trans_log}"
+
+    #Outputpath
+    output="${2}/${title}${teststring} - ${3}.mp4"
+
+    #Transcode
+    echo -e "${ORANGE}Transcoding starts now.${NOCOLOR}"
+    HandBrakeCLI -i "${1}" --stop-at "${stop_at_f}" -o "${output}" -m -O -e nvenc_h265_10bit --encoder-preset "${enc_speed}" -q "${enc_q}" --width ${3} --audio-lang-list "deu,eng" --all-audio -E aac -6 "7point1" -Q 5 --loose-anamorphic --modulus 2 2>&1 | tee -a "${trans_log}"
+    if [[ $(grep "Encode done!" "${trans_log}") ]]; then
+      echo -e "${ORANGE}Transcoding in resolution ${res_width}x${res_height} is done.${NOCOLOR}"
+      echo "Transcoding in resolution ${res_width}x${res_height} is done." >> "${gen_log}"
+      trans_success="true"
+      return "${output}"
+    else
+      echo -e "${ORANGE}Transcoding in resolution ${res_width}x${res_height} failed. Check logs in ${trans_log}${NOCOLOR}"
+      echo "Transcoding in resolution ${res_width}x${res_height} failed. Check logs in ${trans_log}" >> "${gen_log}"
+      trans_success="false"
+    fi
+}
 
 for orig_file in $source_dir/*.mkv; do
   # Check if orig_file has already been processed and filter according to user input
   if [[ ${orig_file} != *"${teststring}_done"* ]] && [[ ${orig_file} = *"${filter}"* ]]; then
+    trans_success=
+    trans_log=
+    extract_success=
+
     # Get movie length. Necessary because test mode requires a specified stop at for HandBrakeCLi and ffmpeg. Cannot be NULL.
     movie_len=$(mediainfo --Output=General\;%Duration% "${orig_file}")
     movie_len_s=$((${movie_len}/1000))
@@ -114,10 +193,6 @@ for orig_file in $source_dir/*.mkv; do
 
 
     # Set paths for logfiles and create them
-    trans_orig_log="${log_dir_movie_date}/${title}_transcode.log"
-    touch "${trans_orig_log}"
-    echo "Title: ${title}" >> "${trans_orig_log}"
-    echo "Log for: ${current_date_time}" >> "${trans_orig_log}"
 
     DV_dovi_extract_log="${log_dir_movie_date}/${title}_RPU_extract.log"
     touch "${DV_dovi_extract_log}"
@@ -126,17 +201,17 @@ for orig_file in $source_dir/*.mkv; do
 
     DV_ffmpeg_extract_log="${log_dir_movie_date}/${title}_orig_extract.log"
     touch "${DV_ffmpeg_extract_log}"
-    echo "Title: ${title}" >>
+    echo "Title: ${title}" >> "${DV_ffmpeg_extract_log}"
     echo "Log for: ${current_date_time}" >> "${DV_ffmpeg_extract_log}"
 
     DV_orig_mux_log="${log_dir_movie_date}/${title}_mux.log"
     touch "${DV_orig_mux_log}"
-    echo "Title: ${title}" >>
+    echo "Title: ${title}" >> "${DV_orig_mux_log}"
     echo "Log for: ${current_date_time}" >> "${DV_orig_mux_log}"
 
     gen_log="${log_dir_movie_date}/${title}.log"
     touch "${gen_log}"
-    echo "Title: ${title}" >>
+    echo "Title: ${title}" >> "${gen_log}"
     echo "Log for: ${current_date_time}" >> "${gen_log}"
 
     # Use Handbrake to create .mp4 version with specified settings
@@ -145,99 +220,47 @@ for orig_file in $source_dir/*.mkv; do
     res_str=${res_height}"p"
     trans_file="${target_dir_movie}/${title}${teststring} - ${res_str}.mp4"
 
-    #Transcode
-    echo -e "${ORANGE}Transcoding in Original resolution starts now.${NOCOLOR}"
-    echo "${current_date_time}" >> "${trans_orig_log}"
-    HandBrakeCLI -i "${orig_file}" --stop-at "${stop_at_f}" -o "${trans_file}" -m -O -e nvenc_h265_10bit --encoder-preset "${enc_speed}" -q "${enc_q}" --audio-lang-list "deu,eng" --all-audio -E aac -6 "7point1" -Q 5 --loose-anamorphic --modulus 2 2>&1 | tee -a "${trans_orig_log}"
 
-    if [[ $(grep "Encode done!" "${trans_orig_log}") ]]; then
-      echo -e "${ORANGE}Transcoding in original resolution done.${NOCOLOR}"
-      echo "Transcoding in original resolution done." >> "${gen_log}"
+    # Transcode file to mp4
+    if [[ ${only_DV} != "true" ]]; then
 
+      trans_file=$(transcode "${orig_file}" "${trans_file}" "${res_width}")
 
-      # extract DV metadate if needed/specified
-      if [[ ${doDV} == "true" ]]; then
-        echo -e "${ORANGE}Dolby Vision detected. Starting to extract RPU${NOCOLOR}"
-        # Get the Dolby Vision Type. Is not actually necessary to make it work.
-        DV_Meta_String=$(mediainfo --Output=Video\;%HDR_Format% "${orig_file}")
-        # Specifying Directories
-        rpu_file="${working_dir_movie}/${title}${teststring}_RPU.bin"
-        orig_video_stream="${working_dir_movie}/${title}${teststring}_raw.hevc"
-        trans_file_DV="${target_dir_movie}/${title}${teststring} - DV${res_str}.mp4"
-
-        # Extract RPU
-        ffmpeg -y -i "${orig_file}" -c:v:0 copy -frames:v:0 "${stop_at_ffmpeg_f}" -vbsf hevc_mp4toannexb -f hevc "${orig_video_stream}" 2> "${DV_ffmpeg_extract_log}"
-        dovi_tool  -m 2 -c --drop-hdr10plus extract-rpu "${orig_video_stream}" -o "${rpu_file}" 2>&1 | tee -a "${DV_dovi_extract_log}"
-
-        if [[ $(grep "Reordering metadata... Done." "${DV_dovi_extract_log}") ]]; then
-          echo -e "${ORANGE}Dolby Vision metadata was succesfully extracted.${NOCOLOR}"
-          echo "Dolby Vision metadata was succesfully extracted." >> "${gen_log}"
-        else
-          echo -e "${ORANGE}Dolby Vision metadata extraction failed. Check logs: ${DV_dovi_extract_log}${NOCOLOR}"
-          echo "Dolby Vision metadata extraction failed. Check logs: ${DV_dovi_extract_log}" >> "${gen_log}"
-        fi
-
-        # Set Paths for the Videostreamfiles in working directory
-        vidbitstr_file="${working_dir_movie}/${title}${teststring}.hevc"
-        vidbitstr_DV_file="${working_dir_movie}/${title}${teststring}_DV.hevc"
-
-        #Demux Transcoded Video from MP4 hand over to dovi and inject rpu and remux everything together
-        echo -e "${ORANGE}Starting extraction of Video Bitstream of Transcoded MP4.${NOCOLOR}"
-        ffmpeg -i "${trans_file}" -vcodec copy -vbsf hevc_mp4toannexb -f hevc -y "${vidbitstr_file}" 2>> "${DV_orig_mux_log}"
-
-        echo -e "${ORANGE}Starting injection of RPU in Video Bitstream of Transcoded MP4.${NOCOLOR}"
-        dovi_tool inject-rpu -i "${vidbitstr_file}" --rpu-in "${rpu_file}" -o "${vidbitstr_DV_file}" 2>> "${DV_orig_mux_log}"
-
-        echo -e "${ORANGE}Starting Remuxing of DV bitstream and original audio from MP4.${NOCOLOR}"
-        ffmpeg -i "${trans_file}" -i "${vidbitstr_DV_file}" -map 1:v -map 0:a -c copy -y "${trans_file_DV}" 2>> "${DV_orig_mux_log}"
-      fi
-    else
-      echo -e "${ORANGE}Transcoding in original resolution failed. Check logs in ${trans_orig_log}${NOCOLOR}"
-      echo "Transcoding in original resolution failed. Check logs in ${trans_orig_log}" >> "${gen_log}"
-      orig_fail="true"
     fi
+
+    # extract DV metadate if needed/specified
+    if [[ ${doDV} == "true" ]] && [[ ${trans_success} == "true" ]]; then
+
+      rpu_file=$(extract_RPU "${orig_file}")
+
+    fi
+
+    # inject DV metadate
+    if [[ ${extract_success} == "true" ]]; then
+
+      inject_RPU "${trans_file}" "${res_width}" "${rpu_file}"
+
+    fi
+
 
     # Now do all of this again in FHD. DV Metadata RPU of UHD Version is identical, so no new extraction necessary
     if [[ ${res_width} -gt 1920 ]] && [[ ${only_orig_res} != "true" ]] && [[ ${orig_fail != "true" } ]]; then
 
-      # Set FHD path
-      trans_FHD_file="${target_dir_movie}/${title}${teststring} - 1080p.mp4"
+      trans_success=
+      trans_log=
+      extract_success=
+      # Transcode file to mp4
+      if [[ ${only_DV} != "true" ]]; then
 
-      # Create Log Files
-      DV_FHD_mux_log="${log_dir_movie_date}/${title}_FHD_mux.log"
-      touch "${DV_FHD_mux_log}"
-      trans_FHD_log="${log_dir_movie_date}/${title}_FHD_transcode.log"
-      touch "${trans_FHD_log}"
+        trans_file=$(transcode "${orig_file}" "${trans_file}" "1080")
 
-      #Transcode in FHD
-      echo -e "${ORANGE}Transcoding in FHD resolution starts now.${NOCOLOR}"
-      echo "${current_date_time}" >> "${trans_FHD_log}"
-      HandBrakeCLI -i "${orig_file}" --stop-at "${stop_at_f}" -o "${trans_FHD_file}" -m -O -e nvenc_h265_10bit --encoder-preset "${enc_speed}" -q "${enc_q}" --width 1920 --audio-lang-list "deu,eng" --all-audio -E aac -6 "7point1" -Q 5 --loose-anamorphic --modulus 2 2>&1 | tee -a "${trans_FHD_log}"
+      fi
 
+      # inject DV metadate
+      if [[ ${extract_success} == "true" ]]; then
 
-      if [[ $(grep "Encode done!" "${trans_FHD_log}") ]]; then
-        echo -e "${ORANGE}Transcoding in FHD resolution done.${NOCOLOR}"
-        echo "Transcoding in FHD resolution done." >> "${gen_log}"
+        inject_RPU "${trans_file}" "1080" "${rpu_file}"
 
-        if [[ ${doDV} == "true" ]]; then
-          #Set all the paths for FHD Version
-          trans_FHD_file_DV="${target_dir_movie}/${title}${teststring} - DV1080p.mp4"
-          vidbitstr_FHD_file="${working_dir_movie}/${title}${teststring}_FHD.hevc"
-          vidbitstr_FHD_DV_file="${working_dir_movie}/${title}${teststring}_FHD_DV.hevc"
-
-          #Demux Transcoded Video from MP4 hand over to dovi and inject rpu and remux everything together
-          echo -e "${ORANGE}Starting extraction of FHD Video Bitstream of Transcoded MP4.${NOCOLOR}"
-          ffmpeg -i "${trans_FHD_file}" -vcodec copy -vbsf hevc_mp4toannexb -f hevc -y "${vidbitstr_FHD_file}" 2> "${DV_FHD_mux_log}"
-
-          echo -e "${ORANGE}Starting injection of RPU in FHD Video Bitstream of Transcoded MP4.${NOCOLOR}"
-          dovi_tool inject-rpu -i "${vidbitstr_FHD_file}" --rpu-in "${rpu_file}" -o "${vidbitstr_FHD_DV_file}" 2>&1 | tee -a  "${DV_FHD_mux_log}"
-
-          echo -e "${ORANGE}Starting Remuxing of FHD DV bitstream and original audio from MP4.${NOCOLOR}"
-          ffmpeg -i "${trans_FHD_file}" -i "${vidbitstr_FHD_DV_file}" -map 1:v -map 0:a -c copy -y "${trans_FHD_file_DV}" 2>> "${DV_FHD_mux_log}"
-        fi
-      else
-        echo -e "${ORANGE}Transcoding in FHD resolution failed. Check logs in ${trans_FHD_log}${NOCOLOR}"
-        echo "Transcoding in FHD resolution failed. Check logs in ${trans_FHD_log}" >> "${gen_log}"
       fi
     fi
 
