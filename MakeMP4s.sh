@@ -260,29 +260,32 @@ echo -e "Here is a List of all files you selected:${NOCOLOR}"
 
 shopt -s nullglob
 for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
-  #Reset success states if specified
-  if [[ ${reset_succ} == "true" ]]; then
+  # Reset success states
+
     orig_file_new="$(echo "${orig_file}" | sed 's/\(.*\)_-.*-_\(.*\)/\1\2/')"
     if [[ "${orig_file}" != "${orig_file_new}" ]]; then
       mv "${orig_file}" "${orig_file_new}"
       orig_file="${orig_file_new}"
       orig_file_new=
     fi
-  fi
+
+  # Delete Test string
+  orig_file_new=${orig_file/" - test"/}
+    if [[ "${orig_file}" != "${orig_file_new}" ]]; then
+      mv "${orig_file}" "${orig_file_new}"
+      orig_file="${orig_file_new}"
+      orig_file_new=
+    fi
 done
 
 shopt -s nullglob
 for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
-    # Override succ_str when specified
-  if [[ ${ignore_succ} == "true" ]]; then
-    succ_str="00000"
-  else
     # Get Successstring
     succ_str=$(echo "${orig_file}" | sed 's/.*_-\(.*\)-_.*/\1/')
   fi
 
   # Check if orig_file has already been processed and filter according to user input
-  if [[ ${orig_file} = *"${filter}"* ]] || ([[ ${orig_file} = *"${filter}"* ]] && ([[ $succ_str =~ 2 ]] || [[ $succ_str =~ 3 ]])) || ([[ -z "${teststring}" ]] && [[ ${orig_file} = *"${filter}"* ]] && [[ ${orig_file} = *"_test"* ]]); then
+  if [[ ${orig_file} = *"${filter}"* ]] || ([[ -z "${teststring}" ]] && [[ ${orig_file} = *"${filter}"* ]] && [[ ${orig_file} = *"_test"* ]]); then
     echo $orig_file
   fi
 done
@@ -307,16 +310,8 @@ fi
 
 shopt -s nullglob
 for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
-  # Override succ_str when specified
-  if [[ ${ignore_succ} == "true" ]]; then
-    succ_str="00000"
-  else
-    # Get Successstring
-    succ_str=$(echo "${orig_file}" | sed 's/.*_-\(.*\)-_.*/\1/')
-  fi
-
   # Check if orig_file has already been processed and filter according to user input
-  if [[ ${orig_file} = *"${filter}"* ]] || ([[ ${orig_file} = *"${filter}"* ]] && ([[ $succ_str =~ 2 ]] || [[ $succ_str =~ 3 ]])) || ([[ -z "${teststring}" ]] && [[ ${orig_file} = *"${filter}"* ]] && [[ ${orig_file} = *"_test"* ]]); then
+  if [[ ${orig_file} = *"${filter}"* ]] || ([[ -z "${teststring}" ]] && [[ ${orig_file} = *"${filter}"* ]] && [[ ${orig_file} = *"_test"* ]]); then
     echo $orig_file
 
     # Set current Date/time
@@ -484,22 +479,8 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
     # Change Filename of orig file, so status is visible in filename
     echo -e "${Orange}Renaming original source file to make state visible:${NOCOLOR}"
 
-    # Clear Success-state of original file
-    orig_file_new="$(echo "${orig_file}" | sed 's/\(.*\)_-.*-_\(.*\)/\1\2/')"
-    if [[ "${orig_file}" != "${orig_file_new}" ]]; then
-      mv "${orig_file}" "${orig_file_new}"
-      orig_file="${orig_file_new}"
-      orig_file_new=
-    fi
-
-    # Avoid double test string:
-    if [[ $(grep " - test" "${orig_file}") ]]; then
-      mv "${orig_file}" "${orig_file%.*}${succ_str}.mkv"
-      orig_file="${orig_file%.*}${succ_str}.mkv"
-    else
-      mv "${orig_file}" "${orig_file%.*}${teststring}${succ_str}.mkv"
-      orig_file="${orig_file%.*}${teststring}${succ_str}.mkv"
-    fi
+    mv "${orig_file}" "${orig_file%.*}${teststring}${succ_str}.mkv"
+    orig_file="${orig_file%.*}${teststring}${succ_str}.mkv"
 
 
     echo -e "${ORANGE}Renamed original file to:${NOCOLOR}"
