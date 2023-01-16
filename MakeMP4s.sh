@@ -280,10 +280,6 @@ done
 
 shopt -s nullglob
 for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
-    # Get Successstring
-    succ_str=$(echo "${orig_file}" | sed 's/.*_-\(.*\)-_.*/\1/')
-  fi
-
   # Check if orig_file has already been processed and filter according to user input
   if [[ ${orig_file} = *"${filter}"* ]] || ([[ -z "${teststring}" ]] && [[ ${orig_file} = *"${filter}"* ]] && [[ ${orig_file} = *"_test"* ]]); then
     echo $orig_file
