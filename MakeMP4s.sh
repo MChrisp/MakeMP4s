@@ -122,7 +122,7 @@ rpu_file="${working_dir_movie}/${title}${teststring}_RPU.bin"
     echo "Dolby Vision metadata extraction failed. Check logs: ${DV_dovi_extract_log}" >> "${gen_log}"
     succ_str="${succ_str:0:4}2${succ_str:5}"
   fi
-elif [[ ! $(mediainfo --Output=Video\;%HDR_Format% "${orig_file}" | grep "Dolby Vision") ]];
+elif [[ ! $(mediainfo --Output=Video\;%HDR_Format% "${orig_file}" | grep "Dolby Vision") ]]; then
   echo -e "${ORANGE}Dolby Vision conversion not not needed.${NOCOLOR}"
   echo "Dolby Vision conversion not not needed." >> "${gen_log}"
   succ_str="${succ_str:0:4}3${succ_str:5}"
