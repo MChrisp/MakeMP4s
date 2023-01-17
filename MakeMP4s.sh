@@ -22,7 +22,7 @@ transcode(){
   if [[ $tr_mov_existed == "false" ]] || [[ ${overwrite} == "true" ]]; then
 
     echo -e "${ORANGE}Transcoding starts now.${NOCOLOR}"
-    HandBrakeCLI -i "${1}" --stop-at "${stop_at_f}" -o "${trans_movie}" -m -O -e nvenc_h265_10bit --encoder-preset "${enc_speed}" -q "${enc_q}" --width ${3} --audio-lang-list "deu,eng" --all-audio -E aac -6 "7point1" -Q 5 --loose-anamorphic --modulus 2 2>&1 | tee -a "${trans_log}"
+    HandBrakeCLI -i "${1}" --stop-at "${stop_at_f}" -o "${trans_movie}" -m -O -e nvenc_h265_10bit --encoder-preset "${enc_speed}" -q "${enc_q}" --width ${3} --audio-lang-list "deu,eng" --all-audio -E "copy:ac3,copy:eac3" --audio-fallback "eac3" -6 "7point1" --loose-anamorphic --modulus 2 2>&1 | tee -a "${trans_log}"
   fi
 
   # Set transcoded DV Movie string for Dolby Vision Extraction in next step
