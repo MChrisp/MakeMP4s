@@ -386,7 +386,7 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
     touch "${gen_log}"
     echo "Title: ${title}" >> "${gen_log}"
     echo "Log for: ${current_date_time}" >> "${gen_log}"
-    cat $confdir >> $gen_log
+    cat $confdir >> "${gen_log}"
 
     # Get movie length. Necessary because test mode requires a specified stop at for HandBrakeCLi and ffmpeg. Cannot be NULL.
     movie_len=$(mediainfo --Output=General\;%Duration% "${orig_file}")
