@@ -12,16 +12,21 @@ transcode(){
     #Outputpath
     trans_movie="${2}/${title}${teststring} - ${4}.mp4"
 
-  #Transcode
-  if [[ ! -f ${trans_movie} ]] || [[ ${overwrite} == "true" ]]; then
-    if [[ -f ${trans_movie} ]]; then
+    if [[ ${trans_movie} ]]; then
       tr_mov_existed="true"
+      echo -e "${ORANGE}Transcoded movie in resolution ${3}x${4} found, scipping.${NOCOLOR}"
     else
       tr_mov_existed="false"
     fi
+  #Transcode
+  if [[ $tr_mov_existed == "false" ]] || [[ ${overwrite} == "true" ]]; then
+
     echo -e "${ORANGE}Transcoding starts now.${NOCOLOR}"
     HandBrakeCLI -i "${1}" --stop-at "${stop_at_f}" -o "${trans_movie}" -m -O -e nvenc_h265_10bit --encoder-preset "${enc_speed}" -q "${enc_q}" --width ${3} --audio-lang-list "deu,eng" --all-audio -E aac -6 "7point1" -Q 5 --loose-anamorphic --modulus 2 2>&1 | tee -a "${trans_log}"
   fi
+
+  # Set transcoded DV Movie string for Dolby Vision Extraction in next step
+  trans_movie_DV="${target_dir_movie}/${title}${teststring} - DV${4}.mp4"
 
   if [[ $(grep "Encode done!" "${trans_log}") ]] || [[ ${tr_mov_existed} == "true" ]]; then
     if [[ $(grep "Encode done!" "${trans_log}") ]]; then
@@ -58,7 +63,7 @@ transcode(){
     fi
   fi
 }
-# Function for extracting RPU. Argument position: Original MKV File with DV metadata
+# Function for extracting RPU. Argument position: 1. Original MKV File with DV metadata 2. Target resolution width in pixel
 extract_RPU(){
 if [[ ${doDV} == "true" ]]; then
 echo -e "${ORANGE}Dolby Vision detected.${NOCOLOR}"
@@ -68,13 +73,19 @@ DV_Meta_String=$(mediainfo --Output=Video\;%HDR_Format% "$1")
 
 # Set path for RPU.bin
 rpu_file="${working_dir_movie}/${title}${teststring}_RPU.bin"
+  if [[ -f ${rpu_file} ]]; then
+    rpu_existed="true"
+  else
+    rpu_existed="false"
+  fi
 
-  if [[ ! -f ${rpu_file} ]] || [[ ${overwrite} == "true" ]]; then
-      if [[ -f ${rpu_file} ]]; then
-        rpu_existed="true"
-      else
-        rpu_existed="false"
-      fi
+  if [[ -f ${trans_movie_DV} ]]; then
+    trans_movie_DV_existed="true"
+  else
+    trans_movie_DV_existed="false"
+  fi
+
+  if ([[ ${trans_movie_DV_existed} == "false" ]] && [[ ${rpu_existed} == "false" ]]) || [[ ${overwrite} == "true" ]]; then
       # Set path for original.hevc
       orig_video_stream="${working_dir_movie}/${title}${teststring}_raw.hevc"
       # Prepare log
@@ -90,22 +101,34 @@ rpu_file="${working_dir_movie}/${title}${teststring}_RPU.bin"
       # Extract RPU
       ffmpeg -y -i "${orig_file}" -c:v:0 copy -frames:v:0 "${stop_at_ffmpeg_f}" -vbsf hevc_mp4toannexb -f hevc - 2> "${DV_ffmpeg_extract_log}" | dovi_tool  -m 2 -c --drop-hdr10plus extract-rpu - -o "${rpu_file}" 2>&1 | tee -a "${DV_dovi_extract_log}"
   fi
-      if [[ $(grep "Reordering metadata... Done." "${DV_dovi_extract_log}") ]] || [[ ${rpu_existed} == "true" ]]; then
 
-        if [[ ${rpu_existed} == "true" ]]; then
-          echo -e "${ORANGE}Dolby Vision metadata already existed. If you have trouble, delete this ${rpu_file} and try again. Or try config overwrite='true'${NOCOLOR}"
-          echo "Dolby Vision metadata already existed. If you have trouble, delete this ${rpu_file} and try again. Or try config overwrite='true'" >> "${gen_log}"
-        elif [[ $(grep "Reordering metadata... Done." "${DV_dovi_extract_log}") ]]; then
-          echo -e "${ORANGE}Dolby Vision metadata was succesfully extracted.${NOCOLOR}"
-          echo "Dolby Vision metadata was succesfully extracted." >> "${gen_log}"
-        fi
-        succ_str="${succ_str:0:4}1${succ_str:5}"
-      else
-        echo -e "${ORANGE}Dolby Vision metadata extraction failed. Check logs: ${DV_dovi_extract_log}${NOCOLOR}"
-        echo "Dolby Vision metadata extraction failed. Check logs: ${DV_dovi_extract_log}" >> "${gen_log}"
-        succ_str="${succ_str:0:4}2${succ_str:5}"
-      fi
+  if [[ $(grep "Reordering metadata... Done." "${DV_dovi_extract_log}") ]] || [[ ${rpu_existed} == "true" ]]; then
+
+    if [[ ${rpu_existed} == "true" ]]; then
+      echo -e "${ORANGE}Dolby Vision metadata already existed. If you have trouble, delete this ${rpu_file} or ${trans_movie_DV} and try again. Or try config overwrite='true'${NOCOLOR}"
+      echo "Dolby Vision metadata already existed. If you have trouble, delete this ${rpu_file} or ${trans_movie_DV} and try again. Or try config overwrite='true'" >> "${gen_log}"
+    elif [[ $(grep "Reordering metadata... Done." "${DV_dovi_extract_log}") ]]; then
+      echo -e "${ORANGE}Dolby Vision metadata was succesfully extracted.${NOCOLOR}"
+      echo "Dolby Vision metadata was succesfully extracted." >> "${gen_log}"
+    fi
+
+    succ_str="${succ_str:0:4}1${succ_str:5}"
+  elif [[ ${trans_movie_DV_existed} == "true" ]]; then
+      echo -e "${ORANGE}Dolby Vision Movie already existed. If you have trouble, delete this ${trans_movie_DV} and try again. Or try config overwrite='true'${NOCOLOR}"
+      echo "Dolby Vision Movie already existed. If you have trouble, delete this ${trans_movie_DV} and try again. Or try config overwrite='true'" >> "${gen_log}"
+      succ_str="${succ_str:0:4}3${succ_str:5}"
+  else
+    echo -e "${ORANGE}Dolby Vision metadata extraction failed. Check logs: ${DV_dovi_extract_log}${NOCOLOR}"
+    echo "Dolby Vision metadata extraction failed. Check logs: ${DV_dovi_extract_log}" >> "${gen_log}"
+    succ_str="${succ_str:0:4}2${succ_str:5}"
+  fi
+elif [[ ! $(mediainfo --Output=Video\;%HDR_Format% "${orig_file}" | grep "Dolby Vision") ]];
+  echo -e "${ORANGE}Dolby Vision conversion not not needed.${NOCOLOR}"
+  echo "Dolby Vision conversion not not needed." >> "${gen_log}"
+  succ_str="${succ_str:0:4}3${succ_str:5}"
 else
+  echo -e "${ORANGE}Dolby Vision conversion possible but not selected. Change config if you want conversion to happen.${NOCOLOR}"
+  echo "Dolby Vision conversion possible but not selected. Change config if you want conversion to happen." >> "${gen_log}"
   succ_str="${succ_str:0:4}3${succ_str:5}"
 fi
 }
@@ -126,16 +149,33 @@ inject_RPU(){
     # Set Paths for Dolby Vision movie
     trans_movie_DV="${target_dir_movie}/${title}${teststring} - DV${2}.mp4"
 
+    echo "Input Vars: ${trans_movie} ${res_str} ${rpu_file} ${res_width}" >> "${DV_mux_log}"
+  # Check which files are already existing
+  if [[ -f ${vidbitstr_file} ]]; then
+    vidbitstr_file_existed="true"
+  else
+    vidbitstr_file_existed="false"
+  fi
+  if [[ -f ${vidbitstr_DV_file} ]]; then
+    vidbitstr_DV_file_existed="true"
+  else
+    vidbitstr_DV_file_existed="false"
+  fi
+
+  if [[ -f ${trans_movie_DV} ]]; then
+    trans_movie_DV_existed="true"
+  else
+    trans_movie_DV_existed="false"
+  fi
 
     #Demux Transcoded Video from MP4 hand over to dovi and inject rpu and remux everything together
-  if [[ ! -f ${vidbitstr_file} ]] || [[ ${overwrite} == "true" ]]; then
-    if [[ -f ${vidbitstr_file} ]]; then
-      vidbitstr_file_existed="true"
-    else
-      vidbitstr_file_existed="false"
-    fi
+  if ([[ ${vidbitstr_file_existed} == "false" ]] && [[ ${vidbitstr_DV_file_existed} == "false" ]] && [[ ${trans_movie_DV_existed} == "false" ]]) || [[ ${overwrite} == "true" ]]; then
+
     echo -e "${ORANGE}Starting extraction of Video Bitstream of Transcoded MP4.${NOCOLOR}"
+    echo "Starting extraction of Video Bitstream of Transcoded MP4." >> "${gen_log}"
+
     ffmpeg -y -i "${1}" -vcodec copy -vbsf hevc_mp4toannexb -f hevc "${vidbitstr_file}" 2>> "${DV_mux_log}"
+
     if [[ $? -eq 0 ]]; then
       echo -e "${ORANGE}Extraction of Video Bitstream of Transcoded MP4 was successfull.${NOCOLOR}"
       echo "Extraction of Video Bitstream of Transcoded MP4 was successfull." >> "${DV_mux_log}"
@@ -148,13 +188,11 @@ inject_RPU(){
     echo "Video Bitstream of Transcoded MP4 already existed. If you have trouble, delete this ${vidbitstr_file} and try again. Or try config overwrite='true'" >> "${gen_log}"
   fi
 
-  if [[ ! -f ${vidbitstr_DV_file} ]] || [[ ${overwrite} == "true" ]]; then
-    if [[ -f ${vidbitstr_DV_file} ]]; then
-      vidbitstr_DV_file_existed="true"
-    else
-      vidbitstr_DV_file_existed="false"
-    fi
+
+  if ([[ ${vidbitstr_DV_file_existed} == "false" ]] && [[ ${trans_movie_DV_existed} == "false" ]]) || [[ ${overwrite} == "true" ]]; then
+
     echo -e "${ORANGE}Starting injection of RPU in Video Bitstream of Transcoded MP4.${NOCOLOR}"
+    echo "Starting injection of RPU in Video Bitstream of Transcoded MP4." >> "${gen_log}"
 
     dovi_tool inject-rpu -i "${vidbitstr_file}" --rpu-in "${3}" -o "${vidbitstr_DV_file}" 2>> "${DV_mux_log}"
     if [[ $? -eq 0 ]]; then
@@ -169,13 +207,10 @@ inject_RPU(){
     echo "Video Bitstream with Dolby Vision already existed. If you have trouble, delete this ${vidbitstr_DV_file} and try again. Or try config overwrite='true'" >> "${gen_log}"
   fi
 
-  if [[ ! -f ${trans_movie_DV} ]] || [[ ${overwrite} == "true" ]]; then
-    if [[ -f ${trans_movie_DV} ]]; then
-      trans_movie_DV_existed="true"
-    else
-      trans_movie_DV_existed="false"
-    fi
+  if [[ ${trans_movie_DV_existed} == "false" ]] || [[ ${overwrite} == "true" ]]; then
+
     echo -e "${ORANGE}Starting Remuxing of DV bitstream and original audio from MP4.${NOCOLOR}"
+    echo "Starting Remuxing of DV bitstream and original audio from MP4." >> "${gen_log}"
 
     ffmpeg -y -i "${1}" -i "${vidbitstr_DV_file}" -map 1:v -map 0:a -c copy  -movflags +faststart "${trans_movie_DV}" 2>> "${DV_mux_log}"
     if [[ $? -eq 0 ]] || [[ ${trans_movie_DV_existed} == "true" ]]; then
@@ -321,6 +356,7 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
     trans_movie=
     rpu_file=
     DV_Meta_String=
+    trans_movie_DV=
     succ_str="_-00000-_"
     # Status for original file explanation: Status will be put at the end of the original filename. It contains 5 digits. 0 indicates not set, 1 Indicates success, 2 indicates failure, 3 indicates not applicable. The order of the status are: Transcode in original resolution; Transcode in FHD Resolution; RPU Extract; RPU inject original Resolution; RPU inject in FHD Resolution. e.g. for full success: _-11111-_
 
@@ -408,7 +444,7 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
     fi
 
     # inject DV metadate
-    if [[ ${succ_str:4:1} == "1" ]]; then
+    if ([[ ${succ_str:4:1} == "1" ]] || [[ ${succ_str:4:1} == "3" ]]) && [[ ${doDV} == "true" ]]; then
 
       inject_RPU "${trans_movie}" "${res_str}" "${rpu_file}" "${res_width}"
 
@@ -438,6 +474,13 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
 
       sleep 1
 
+      # extract DV metadate if needed/specified
+      if [[ ${succ_str:2:1} == "1" ]] || [[ ${succ_str:3:1} == "1" ]]; then
+
+        extract_RPU "${orig_file}"
+
+      fi
+
       # inject DV metadate
       if [[ ${succ_str:4:1} == "1" ]]; then
 
@@ -446,7 +489,7 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
       fi
 
       # Delete non DV Version
-      if [[ ${onlyDVmovie} == "true" ]]; then
+      if [[ ${onlyDVmovie} == "true" ]] && [[ $doDV == "true" ]]; then
         echo -e "${ORANGE}Deleting non DV Movie:${NOCOLOR}"
         rm "${trans_movie}" -v
       else
