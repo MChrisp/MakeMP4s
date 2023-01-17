@@ -12,7 +12,7 @@ transcode(){
     #Outputpath
     trans_movie="${2}/${title}${teststring} - ${4}.mp4"
 
-    if [[ ${trans_movie} ]]; then
+    if [[ -f ${trans_movie} ]]; then
       tr_mov_existed="true"
       echo -e "${ORANGE}Transcoded movie in resolution ${3}x${4} found, scipping.${NOCOLOR}"
     else
