@@ -11,10 +11,10 @@ transcode(){
 
     #Outputpath
     trans_movie="${2}/${title}${teststring} - ${4}.mp4"
+    trans_movie_DV="${2}/${title}${teststring} - DV${4}.mp4"
 
-    if [[ -f ${trans_movie} ]]; then
+    if [[ -f ${trans_movie} ]] || ([[ ${onlyDVmovie} == "true" ]] && [[ -f ${trans_movie_DV} ]]); then
       tr_mov_existed="true"
-      echo -e "${ORANGE}Transcoded movie in resolution ${3}x${4} found, scipping.${NOCOLOR}"
     else
       tr_mov_existed="false"
     fi
@@ -22,7 +22,9 @@ transcode(){
   if [[ $tr_mov_existed == "false" ]] || [[ ${overwrite} == "true" ]]; then
 
     echo -e "${ORANGE}Transcoding starts now.${NOCOLOR}"
-    HandBrakeCLI -i "${1}" --stop-at "${stop_at_f}" -o "${trans_movie}" -m -O -e nvenc_h265_10bit --encoder-preset "${enc_speed}" -q "${enc_q}" --width ${3} --audio-lang-list "deu,eng" --all-audio -E "copy:ac3,copy:eac3" --audio-fallback "eac3" -6 "7point1" --loose-anamorphic --modulus 2 2>&1 | tee -a "${trans_log}"
+    HandBrakeCLI -i "${1}" --stop-at "${stop_at_f}" -o "${trans_movie}" -m -O -e nvenc_h265_10bit --encoder-preset "${enc_speed}" -q "${enc_q}" --width ${3} --audio-lang-list eng,deu --all-audio -E copy --audio-copy-mask dtshd,ac3,eac3 --audio-fallback eac3 -6 7point1 -B 896 --loose-anamorphic --modulus 2 2>&1 | tee -a "${trans_log}"
+  else
+    echo -e "${ORANGE}Transcoded movie in resolution ${3}x${4} found, scipping.${NOCOLOR}" 2>> "${gen_log}"
   fi
 
   # Set transcoded DV Movie string for Dolby Vision Extraction in next step
@@ -123,8 +125,8 @@ rpu_file="${working_dir_movie}/${title}${teststring}_RPU.bin"
     succ_str="${succ_str:0:4}2${succ_str:5}"
   fi
 elif [[ ! $(mediainfo --Output=Video\;%HDR_Format% "${orig_file}" | grep "Dolby Vision") ]]; then
-  echo -e "${ORANGE}Dolby Vision conversion not not needed.${NOCOLOR}"
-  echo "Dolby Vision conversion not not needed." >> "${gen_log}"
+  echo -e "${ORANGE}Dolby Vision conversion not needed.${NOCOLOR}"
+  echo "Dolby Vision conversion not needed." >> "${gen_log}"
   succ_str="${succ_str:0:4}3${succ_str:5}"
 else
   echo -e "${ORANGE}Dolby Vision conversion possible but not selected. Change config if you want conversion to happen.${NOCOLOR}"
@@ -212,7 +214,7 @@ inject_RPU(){
     echo -e "${ORANGE}Starting Remuxing of DV bitstream and original audio from MP4.${NOCOLOR}"
     echo "Starting Remuxing of DV bitstream and original audio from MP4." >> "${gen_log}"
 
-    ffmpeg -y -i "${1}" -i "${vidbitstr_DV_file}" -map 1:v -map 0:a -c copy  -movflags +faststart "${trans_movie_DV}" 2>> "${DV_mux_log}"
+    ffmpeg -y -i "${1}" -i "${vidbitstr_DV_file}" -map 1:v -map 0:a -c copy -movflags +faststart "${trans_movie_DV}" 2>> "${DV_mux_log}"
     if [[ $? -eq 0 ]] || [[ ${trans_movie_DV_existed} == "true" ]]; then
       if [[ $? -eq 0 ]]; then
         echo -e "${ORANGE}Muxing of DV MP4 was successfull.${NOCOLOR}"
@@ -348,7 +350,6 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
     # Set current Date/time
     current_date_time=$(date +"%Y%m%d_%H%M%S")
 
-    echo -e "${ORANGE}Doing file ${orig_file}${NOCOLOR}"
 
     #(Re)set Variables
     trans_log=
@@ -360,9 +361,11 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
     succ_str="_-00000-_"
     # Status for original file explanation: Status will be put at the end of the original filename. It contains 5 digits. 0 indicates not set, 1 Indicates success, 2 indicates failure, 3 indicates not applicable. The order of the status are: Transcode in original resolution; Transcode in FHD Resolution; RPU Extract; RPU inject original Resolution; RPU inject in FHD Resolution. e.g. for full success: _-11111-_
 
+
     # Get movie title from orig_file name
     title=$(basename "${orig_file}")
     title="${title%.*}"
+
 
     # Create subdirectories for movie
     mkdir "${working_dir}" -v
@@ -377,16 +380,18 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
     log_dir_movie="${log_dir}/${title}"
     mkdir "${log_dir_movie}" -v
 
-    log_dir_movie_date="${log_dir_movie}/${current_date_time}"
-    mkdir "${log_dir_movie_date}" -v
-
     # Prepare general logfile
 
+    log_dir_movie_date="${log_dir_movie}/${current_date_time}"
+    mkdir "${log_dir_movie_date}" -v
     gen_log="${log_dir_movie_date}/${title}.log"
     touch "${gen_log}"
     echo "Title: ${title}" >> "${gen_log}"
     echo "Log for: ${current_date_time}" >> "${gen_log}"
     cat $confdir >> "${gen_log}"
+
+
+    echo -e "${ORANGE}Doing file ${orig_file}${NOCOLOR}"  2>> "${gen_log}"s
 
     # Get movie length. Necessary because test mode requires a specified stop at for HandBrakeCLi and ffmpeg. Cannot be NULL.
     movie_len=$(mediainfo --Output=General\;%Duration% "${orig_file}")
@@ -408,18 +413,18 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
     res_height=$(cut -d x -f 2 <<< $resolution)
 
 
-    echo -e "${ORANGE}Title of movie is: ${title}${NOCOLOR}"
+    echo -e "${ORANGE}Title of movie is: ${title}${NOCOLOR}" 2>> "${gen_log}"
 
     sleep 1
 
     #Set doDV for later if statement, so only DV Movies will get metadata extracted
     if [[ ${dov} == "true" ]] && [[ $(mediainfo --Output=Video\;%HDR_Format% "${orig_file}" | grep "Dolby Vision") ]]; then
-      doDV=true
+      doDV="true"
     else
-      doDV=false
+      doDV="false"
     fi
 
-
+    echo "${ORANGE}DoDV is: $doDV${NOCOLOR}"  2>> "${gen_log}"
 
 
     # Set resolution string for filename in orig resolution
@@ -432,7 +437,8 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
 
     fi
 
-    echo -e "${ORANGE} Transcode movie ${title} in ${res_str} Successstate: ${succ_str}${NOCOLOR}"
+    echo -e "${ORANGE} Transcode movie ${title} in ${res_str} Successstate: ${succ_str}${NOCOLOR}" 2>> "${gen_log}"
+
 
     sleep 1
 
@@ -451,11 +457,11 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
     fi
 
     # Delete non DV Version
-    if [[ ${onlyDVmovie} == "true" ]]; then
-      echo -e "${ORANGE}Deleting non DV Movie:${NOCOLOR}"
+    if [[ ${onlyDVmovie} == "true" ]] && [[ $doDV == "true" ]]; then
+      echo -e "${ORANGE}Deleting non DV Movie:${NOCOLOR}" 2>> "${gen_log}"
       rm "${trans_movie}" -v
     else
-      echo -e "${ORANGE}Keeping non DV Movie Version.${NOCOLOR}"
+      echo -e "${ORANGE}Keeping non DV Movie Version.${NOCOLOR}" 2>> "${gen_log}"
     fi
 
     # Now do all of this again in FHD. DV Metadata RPU of UHD Version is identical, so no new extraction necessary
@@ -470,16 +476,21 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
 
       fi
 
-      echo -e "${ORANGE} Transcode movie ${title} in ${res_str} Successstate: ${succ_str}${NOCOLOR}"
+      echo -e "${ORANGE} Transcode movie ${title} in ${res_str} Successstate: ${succ_str}${NOCOLOR}" 2>> "${gen_log}"
 
       sleep 1
 
       # extract DV metadate if needed/specified
+      # ignore overwrite for this second extraction
+      overwrite_temp="$overwrite"
+      overwrite="false"
       if [[ ${succ_str:2:1} == "1" ]] || [[ ${succ_str:3:1} == "1" ]]; then
 
         extract_RPU "${orig_file}"
 
       fi
+
+      overwrite="$overwrite_temp"
 
       # inject DV metadate
       if [[ ${succ_str:4:1} == "1" ]]; then
@@ -490,44 +501,44 @@ for orig_file in $source_dir/*.{mkv,mp4,m4v}; do
 
       # Delete non DV Version
       if [[ ${onlyDVmovie} == "true" ]] && [[ $doDV == "true" ]]; then
-        echo -e "${ORANGE}Deleting non DV Movie:${NOCOLOR}"
-        rm "${trans_movie}" -v
+        echo -e "${ORANGE}Deleting non DV Movie:${NOCOLOR}" 2>> "${gen_log}"
+        rm "${trans_movie}" -v 2>> "${gen_log}"
       else
-        echo -e "${ORANGE}Keeping non DV Movie Version.${NOCOLOR}"
+        echo -e "${ORANGE}Keeping non DV Movie Version.${NOCOLOR}" 2>> "${gen_log}"
       fi
     fi
 
     # Delete tmp files
     if [[ ${cleanup} == "true" ]]; then
-      echo -e "${ORANGE}Deleting tmp files:${NOCOLOR}"
-      rm "${working_dir_movie}" -rv
+      echo -e "${ORANGE}Deleting tmp files:${NOCOLOR}" 2>> "${gen_log}"
+      rm "${working_dir_movie}" -rv 2>> "${gen_log}"
     fi
 
     # Delete log files
     if [[ $succ_str =~ 2 ]] || [[ $keep_logs == "true" ]]; then
-      echo -e "${ORANGE}Keeping all logs.${NOCOLOR}"
+      echo -e "${ORANGE}Keeping all logs.${NOCOLOR}" 2>> "${gen_log}"
     else
-      echo -e "${Orange}Deleting verbose logs:${NOCOLOR}"
+      echo -e "${Orange}Deleting verbose logs:${NOCOLOR}" 2>> "${gen_log}"
       for log in "${log_dir_movie_date}/*.log"; do
         if [[ ! "$log" == "$gen_log" ]]; then
-          rm "$log" -v
+          rm "$log" -v 2>> "${gen_log}"
         fi
       done
     fi
 
     # Change Filename of orig file, so status is visible in filename
-    echo -e "${Orange}Renaming original source file to make state visible:${NOCOLOR}"
+    echo -e "${Orange}Renaming original source file to make state visible:${NOCOLOR}" 2>> "${gen_log}"
 
-    mv "${orig_file}" "${orig_file%.*}${teststring}${succ_str}.mkv"
-    orig_file="${orig_file%.*}${teststring}${succ_str}.mkv"
+    mv "${orig_file}" "${orig_file%.*}${teststring}${succ_str}.mkv" 2>> "${gen_log}"
+    orig_file="${orig_file%.*}${teststring}${succ_str}.mkv" 2>> "${gen_log}"
 
 
-    echo -e "${ORANGE}Renamed original file to:${NOCOLOR}"
-    echo "${orig_file}"
-    echo -e "${ORANGE}${title} is done.${NOCOLOR}"
+    echo -e "${ORANGE}Renamed original file to:${NOCOLOR}" 2>> "${gen_log}"
+    echo "${orig_file}" 2>> "${gen_log}"
+    echo -e "${ORANGE}${title} is done.${NOCOLOR}" 2>> "${gen_log}"
 
   else
-    echo -e "${orig_file} was already transcoded or filtered"
+    echo -e "${orig_file} was already transcoded or filtered" 2>> "${gen_log}"
   fi
 
 done
