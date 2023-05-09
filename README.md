@@ -1,5 +1,5 @@
 # MakeMP4s
-This script aims to make automate HandBrakeCLI, ffmpeg and dovi_tool and create you MP4 Container from raw BluRays with Dolby Vision.
+This script aims to automate HandBrakeCLI, ffmpeg and dovi_tool and create you MP4 Container from raw BluRays with Dolby Vision.
 
 You will need to install:
 
